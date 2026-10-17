@@ -69,6 +69,10 @@ private final class CoverWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
+private enum PinPrompt {
+    case hidden, setup, confirm, unlock, disable
+}
+
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var covers: [NSWindow] = []
@@ -81,6 +85,25 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var countdowns: [NSTextField] = []
     private var countdownTimer: Timer?
     private var sleepTimer: Timer?
+    private let pinStore: PinStore
+    private var pinEnabled = false
+    private var pinPrompt = PinPrompt.hidden
+    private var pinInput = ""
+    private var pendingPin = ""
+    private var pinMessage = ""
+    private var pinLabels: [NSTextField] = []
+
+    override init() {
+        let directory: URL
+        if CommandLine.arguments.contains("--smoke-test") {
+            directory = FileManager.default.temporaryDirectory.appendingPathComponent("SoftLock-\(UUID())")
+        } else {
+            directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("SoftLock")
+        }
+        pinStore = PinStore(url: directory.appendingPathComponent("pin.json"))
+        super.init()
+    }
     private var defaultHours: Int {
         let stored = UserDefaults.standard.object(forKey: AwakeSettings.defaultHoursKey) as? Int
         guard let stored, (0...9).contains(stored) else { return AwakeSettings.initialHours }
@@ -102,9 +125,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, self.locked else { return event }
             let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
             if event.type == .keyDown, !event.isARepeat, modifiers.isEmpty,
-               let text = event.characters, text.count == 1,
-               let hours = Int(text), (0...9).contains(hours) {
-                self.setAwakeHours(hours)
+               let text = event.characters {
+                self.handleCoverKey(text)
             }
             return nil
         }
@@ -119,6 +141,33 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             print("Display covers: \(covers.count), valid: \(valid)")
             precondition(valid)
             precondition(countdowns.count == covers.count)
+            let testPin = String(Int.random(in: 1000...9999))
+            handleCoverKey("p")
+            precondition(pinPrompt == .setup && !pinEnabled)
+            for digit in testPin { handleCoverKey(String(digit)) }
+            handleCoverKey("\r")
+            precondition(pinPrompt == .confirm)
+            for digit in testPin { handleCoverKey(String(digit)) }
+            handleCoverKey("\r")
+            precondition(pinEnabled && pinPrompt == .hidden)
+            toggleLock()
+            precondition(locked && pinPrompt == .unlock)
+            let wrongPin = String((Int(testPin)! + 1) % 10000).padding(toLength: 4, withPad: "0", startingAt: 0)
+            for digit in wrongPin { handleCoverKey(String(digit)) }
+            handleCoverKey("\r")
+            precondition(locked && pinPrompt == .unlock)
+            handleCoverKey("\u{1b}")
+            handleCoverKey("p")
+            precondition(pinPrompt == .disable && pinEnabled)
+            for digit in testPin { handleCoverKey(String(digit)) }
+            handleCoverKey("\r")
+            precondition(!pinEnabled && locked && pinPrompt == .hidden)
+            handleCoverKey("p")
+            toggleLock()
+            for digit in testPin { handleCoverKey(String(digit)) }
+            handleCoverKey("\r")
+            precondition(!locked && covers.isEmpty)
+            toggleLock()
             setAwakeHours(9)
             precondition(awake.countdown == "540m")
             precondition(awake.hasExpired(at: Date().addingTimeInterval(10 * AwakeSettings.secondsPerHour)))
@@ -139,6 +188,92 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.terminate(nil)
             }
         }
+    }
+
+    private func handleCoverKey(_ text: String) {
+        if pinPrompt != .hidden {
+            if text == "\u{1b}" {
+                showPinPrompt(.hidden)
+            } else if text == "\u{7f}" {
+                if !pinInput.isEmpty { pinInput.removeLast() }
+            } else if text == "\r" || text == "\n" {
+                submitPin()
+            } else if text.count == 1, "0123456789".contains(text), pinInput.count < 4 {
+                pinInput += text
+            }
+            updatePinLabels()
+            return
+        }
+
+        if text.lowercased() == "p" {
+            showPinPrompt(pinEnabled ? .disable : (pinStore.exists() ? .hidden : .setup))
+            if !pinEnabled && pinStore.exists() {
+                pinEnabled = true
+                updateCountdown()
+            }
+            return
+        }
+
+        if text.count == 1, let hours = Int(text), (0...9).contains(hours) {
+            setAwakeHours(hours)
+        }
+    }
+
+    private func showPinPrompt(_ prompt: PinPrompt) {
+        pinPrompt = prompt
+        pinInput = ""
+        pinMessage = ""
+        if prompt != .confirm { pendingPin = "" }
+        updatePinLabels()
+    }
+
+    private func submitPin() {
+        guard pinInput.count == 4 else { return }
+        do {
+            switch pinPrompt {
+            case .setup:
+                pendingPin = pinInput
+                showPinPrompt(.confirm)
+            case .confirm:
+                guard pinInput == pendingPin else {
+                    showPinPrompt(.setup)
+                    pinMessage = "PINs differ. Try again."
+                    return
+                }
+                try pinStore.save(pinInput)
+                pinEnabled = true
+                showPinPrompt(.hidden)
+            case .unlock, .disable:
+                guard try pinStore.matches(pinInput) else {
+                    pinInput = ""
+                    pinMessage = "Incorrect PIN"
+                    return
+                }
+                let action = pinPrompt
+                showPinPrompt(.hidden)
+                if action == .unlock { unlockScreens() }
+                else { pinEnabled = false }
+            case .hidden:
+                break
+            }
+        } catch {
+            pinInput = ""
+            pinMessage = "Could not access local PIN"
+        }
+        updateCountdown()
+    }
+
+    private func updatePinLabels() {
+        let title: String
+        switch pinPrompt {
+        case .hidden: title = ""
+        case .setup: title = "Set a 4-digit PIN"
+        case .confirm: title = "Confirm PIN"
+        case .unlock: title = "Enter PIN to unlock"
+        case .disable: title = "Enter PIN to disable protection"
+        }
+        let text = pinPrompt == .hidden ? "" : "\(title)\n\(String(repeating: "•", count: pinInput.count))\n\(pinMessage.isEmpty ? "Return to confirm · Esc to cancel" : pinMessage)"
+        pinLabels.forEach { $0.stringValue = text }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -166,7 +301,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateCountdown() {
-        countdowns.forEach { $0.stringValue = awake.countdown }
+        countdowns.forEach { $0.stringValue = awake.countdown + (pinEnabled ? " · PIN" : "") }
     }
 
     private func checkSleepTimer(at now: Date = Date()) {
@@ -254,17 +389,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleLock() {
         if locked {
-            locked = false
-            awake.stop()
-            countdownTimer?.invalidate()
-            countdownTimer = nil
-            sleepTimer?.invalidate()
-            sleepTimer = nil
-            countdowns.removeAll()
-            covers.forEach { $0.orderOut(nil) }
-            covers.removeAll()
-            NSApp.presentationOptions = []
-            priorApp?.activate(options: [])
+            if pinEnabled {
+                showPinPrompt(.unlock)
+                return
+            }
+            unlockScreens()
             return
         }
 
@@ -282,10 +411,28 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         covers.first?.makeKeyAndOrderFront(nil)
     }
 
+    private func unlockScreens() {
+        locked = false
+        pinEnabled = false
+        showPinPrompt(.hidden)
+        pinLabels.removeAll()
+        awake.stop()
+        countdownTimer?.invalidate()
+        countdownTimer = nil
+        sleepTimer?.invalidate()
+        sleepTimer = nil
+        countdowns.removeAll()
+        covers.forEach { $0.orderOut(nil) }
+        covers.removeAll()
+        NSApp.presentationOptions = []
+        priorApp?.activate(options: [])
+    }
+
     @objc private func refreshScreens() {
         guard locked else { return }
         covers.forEach { $0.orderOut(nil) }
         countdowns.removeAll()
+        pinLabels.removeAll()
         covers = NSScreen.screens.map { screen in
             let window = CoverWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
             window.backgroundColor = .black
@@ -306,18 +453,30 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             countdown.translatesAutoresizingMaskIntoConstraints = false
             window.contentView?.addSubview(countdown)
             countdowns.append(countdown)
+            let pinLabel = NSTextField(wrappingLabelWithString: "")
+            pinLabel.alignment = .center
+            pinLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+            pinLabel.textColor = .gray
+            pinLabel.translatesAutoresizingMaskIntoConstraints = false
+            window.contentView?.addSubview(pinLabel)
+            pinLabels.append(pinLabel)
             if let content = window.contentView {
                 NSLayoutConstraint.activate([
                     label.centerXAnchor.constraint(equalTo: content.centerXAnchor),
                     label.centerYAnchor.constraint(equalTo: content.centerYAnchor),
                     countdown.centerXAnchor.constraint(equalTo: content.centerXAnchor),
-                    countdown.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -24)
+                    countdown.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -24),
+                    pinLabel.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+                    pinLabel.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 24),
+                    pinLabel.widthAnchor.constraint(equalToConstant: 320)
                 ])
             }
             window.orderFrontRegardless()
             return window
         }
         covers.first?.makeKeyAndOrderFront(nil)
+        updatePinLabels()
+        updateCountdown()
     }
 }
 

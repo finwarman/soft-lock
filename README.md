@@ -10,6 +10,10 @@ While covered, the Mac stays awake for one hour by default, then sleeps. A small
 
 Keeping awake prevents idle display and system sleep. It does not override closing the lid, manual sleep, or a depleted battery.
 
+Press P while covered to require a PIN for this lock. First use asks you to enter and confirm a 4-digit PIN. Later uses reuse it. The unlock shortcut then shows a PIN prompt; Return submits and Escape cancels. P also requires the PIN before disabling protection. Number keys enter the PIN while a prompt is open; otherwise they control the awake timer.
+
+The PIN resets to optional after unlocking. Its salted hash is saved only in `~/Library/Application Support/SoftLock/pin.json`, outside the repository, with owner-only file permissions. No PIN is bundled in the app. PIN protection remains a soft lock and does not prevent Force Quit.
+
 ## Build
 
 Requires macOS and the Xcode command line tools.

@@ -2,7 +2,7 @@
 set -eu
 app_path="$HOME/Applications/SoftLock.app"
 mkdir -p "$app_path/Contents/MacOS"
-swiftc "${0:A:h}/main.swift" -O -framework AppKit -framework Carbon -o "$app_path/Contents/MacOS/SoftLock"
+swiftc "${0:A:h}/main.swift" "${0:A:h}/PinStore.swift" -O -framework AppKit -framework Carbon -o "$app_path/Contents/MacOS/SoftLock"
 cat > "$app_path/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
