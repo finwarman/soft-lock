@@ -16,7 +16,7 @@ The PIN resets to optional after unlocking. Its salted hash is saved only in `~/
 
 ## Touch ID
 
-Click Touch ID on a cover, or press Return or Space, then use your fingerprint in the macOS prompt. Successful authentication uncovers every screen, including PIN-protected covers. Cancelling or failing leaves the covers in place. The shortcut and PIN still work. Touch ID must already be configured in macOS.
+Touch ID is armed automatically when the covers appear, with or without PIN mode. Use your fingerprint in the macOS prompt. If you cancel it, click Touch ID or press Return or Space to try again. Successful authentication uncovers every screen, including PIN-protected covers. Cancelling or failing leaves the covers in place. The shortcut and PIN still work. Touch ID must already be configured in macOS.
 
 ## Hot corner
 

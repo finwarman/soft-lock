@@ -445,6 +445,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             updatePinLabels()
             return
         }
+        pinMessage = ""
+        updatePinLabels()
         let identifier = UUID()
         authenticationID = identifier
         authentication = context
@@ -465,6 +467,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             unlockScreens()
             return
         }
+        pinMessage = "Touch ID did not unlock. Press Return or click Touch ID to try again."
+        updatePinLabels()
         covers.forEach { $0.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow))) }
         NSApp.presentationOptions = [.hideDock, .hideMenuBar, .disableProcessSwitching]
         NSApp.activate(ignoringOtherApps: true)
@@ -505,6 +509,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshScreens()
         NSApp.activate(ignoringOtherApps: true)
         covers.first?.makeKeyAndOrderFront(nil)
+        // Touch ID only listens during an authentication request. Arm it for
+        // every cover session, including sessions without PIN protection.
+        if !CommandLine.arguments.contains("--smoke-test") {
+            DispatchQueue.main.async { [weak self] in self?.requestTouchID() }
+        }
     }
 
     private func unlockScreens() {
