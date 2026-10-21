@@ -99,6 +99,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingPin = ""
     private var pinMessage = ""
     private var pinLabels: [NSTextField] = []
+    private var unlockButtons: [NSButton] = []
 
     override init() {
         let directory: URL
@@ -178,6 +179,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             handleCoverKey("\r")
             precondition(!locked && covers.isEmpty)
             toggleLock()
+            precondition(authentication == nil, "Covering screens must not prompt for Touch ID")
+            handleCoverKey("\r")
+            precondition(!locked && authentication == nil, "Unprotected Return unlock must not authenticate")
+            toggleLock()
             let authenticationTest = UUID()
             authenticationID = authenticationTest
             finishTouchID(.accepted, identifier: UUID())
@@ -211,8 +216,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleCoverKey(_ text: String) {
-        if text == " " || (pinPrompt == .hidden && (text == "\r" || text == "\n")) {
-            requestTouchID()
+        if (text == " " && (pinPrompt == .hidden || pinPrompt == .unlock))
+            || (pinPrompt == .hidden && (text == "\r" || text == "\n")) {
+            requestUnlock()
             return
         }
         if pinPrompt != .hidden {
@@ -327,6 +333,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateCountdown() {
+        unlockButtons.forEach { $0.title = pinEnabled ? "Unlock with Touch ID" : "Unlock" }
         countdowns.forEach { $0.stringValue = awake.countdown + (pinEnabled ? " · PIN" : "") }
     }
 
@@ -434,8 +441,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func requestTouchID() {
-        guard locked, authentication == nil else { return }
+    @objc private func requestUnlock() {
+        guard locked else { return }
+        guard pinEnabled else {
+            unlockScreens()
+            return
+        }
+        showPinPrompt(.unlock)
+        if !CommandLine.arguments.contains("--smoke-test") { requestTouchID() }
+    }
+
+    private func requestTouchID() {
+        guard locked, pinEnabled, authentication == nil else { return }
         let context = LAContext()
         context.localizedFallbackTitle = ""
         var error: NSError?
@@ -489,11 +506,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleLock() {
         if locked {
-            if pinEnabled {
-                showPinPrompt(.unlock)
-                return
-            }
-            unlockScreens()
+            requestUnlock()
             return
         }
 
@@ -509,11 +522,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshScreens()
         NSApp.activate(ignoringOtherApps: true)
         covers.first?.makeKeyAndOrderFront(nil)
-        // Touch ID only listens during an authentication request. Arm it for
-        // every cover session, including sessions without PIN protection.
-        if !CommandLine.arguments.contains("--smoke-test") {
-            DispatchQueue.main.async { [weak self] in self?.requestTouchID() }
-        }
     }
 
     private func unlockScreens() {
@@ -524,6 +532,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         pinEnabled = false
         showPinPrompt(.hidden)
         pinLabels.removeAll()
+        unlockButtons.removeAll()
         awake.stop()
         countdownTimer?.invalidate()
         countdownTimer = nil
@@ -541,6 +550,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         covers.forEach { $0.orderOut(nil) }
         countdowns.removeAll()
         pinLabels.removeAll()
+        unlockButtons.removeAll()
         covers = NSScreen.screens.map { screen in
             let window = CoverWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
             window.backgroundColor = .black
@@ -579,7 +589,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                     pinLabel.widthAnchor.constraint(equalToConstant: 320)
                 ])
             }
-            let touch = NSButton(title: "Touch ID", target: self, action: #selector(requestTouchID))
+            let touch = NSButton(title: "Unlock", target: self, action: #selector(requestUnlock))
+            unlockButtons.append(touch)
             touch.bezelStyle = .rounded
             touch.translatesAutoresizingMaskIntoConstraints = false
             window.contentView?.addSubview(touch)

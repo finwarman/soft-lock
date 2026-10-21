@@ -16,7 +16,7 @@ The PIN resets to optional after unlocking. Its salted hash is saved only in `~/
 
 ## Touch ID
 
-Touch ID is armed automatically when the covers appear, with or without PIN mode. Use your fingerprint in the macOS prompt. If you cancel it, click Touch ID or press Return or Space to try again. Successful authentication uncovers every screen, including PIN-protected covers. Cancelling or failing leaves the covers in place. The shortcut and PIN still work. Touch ID must already be configured in macOS.
+Covering screens never opens a Touch ID prompt. Without PIN mode, the shortcut, Return, Space, or Unlock button uncovers them directly. With PIN mode, trying to unlock opens the macOS Touch ID prompt; your local PIN remains an alternative. Cancelling keeps the covers in place. Fingerprint recognition requires the visible macOS prompt; the physical sensor cannot silently unlock SoftLock. Successful authentication uncovers every screen, including PIN-protected covers. Cancelling or failing leaves the covers in place. The shortcut and PIN still work. Touch ID must already be configured in macOS.
 
 ## Hot corner
 
