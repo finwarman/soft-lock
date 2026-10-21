@@ -16,7 +16,7 @@ The PIN resets to optional after unlocking. Its salted hash is saved only in `~/
 
 ## Build
 
-Requires macOS and the Xcode command line tools.
+Requires macOS 13 or newer and the Xcode command line tools. The build includes Intel and Apple silicon binaries.
 
 ```sh
 zsh build.sh
