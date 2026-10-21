@@ -14,6 +14,8 @@ Press P while covered to require a PIN for this lock. First use asks you to ente
 
 The PIN resets to optional after unlocking. Its salted hash is saved only in `~/Library/Application Support/SoftLock/pin.json`, outside the repository, with owner-only file permissions. No PIN is bundled in the app. PIN protection remains a soft lock and does not prevent Force Quit.
 
+The cover’s unlock button is hidden by default. Enable Show unlock button in the menu if wanted. The keyboard controls still work while it is hidden.
+
 ## Touch ID
 
 Covering screens never opens a Touch ID prompt. Without PIN mode, the shortcut, Return, Space, or Unlock button uncovers them directly. With PIN mode, trying to unlock opens the macOS Touch ID prompt; your local PIN remains an alternative. Cancelling keeps the covers in place. Fingerprint recognition requires the visible macOS prompt; the physical sensor cannot silently unlock SoftLock. Successful authentication uncovers every screen, including PIN-protected covers. Cancelling or failing leaves the covers in place. The shortcut and PIN still work. Touch ID must already be configured in macOS.

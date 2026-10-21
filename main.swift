@@ -77,6 +77,7 @@ private enum PinPrompt {
 }
 
 private final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let unlockButtonKey = "showUnlockButton"
     private static let cornerKey = "bottomRightHotCorner"
     private var corner: HotCorner?
     private var authentication: LAContext?
@@ -333,7 +334,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateCountdown() {
-        unlockButtons.forEach { $0.title = pinEnabled ? "Unlock with Touch ID" : "Unlock" }
+        unlockButtons.forEach {
+            $0.title = pinEnabled ? "Unlock with Touch ID" : "Unlock"
+            $0.isHidden = !UserDefaults.standard.bool(forKey: Self.unlockButtonKey)
+        }
         countdowns.forEach { $0.stringValue = awake.countdown + (pinEnabled ? " · PIN" : "") }
     }
 
@@ -403,6 +407,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         defaultsItem.submenu = defaultsMenu
         menu.addItem(defaultsItem)
         menu.addItem(.separator())
+        let buttonItem = NSMenuItem(title: "Show unlock button", action: #selector(toggleUnlockButton), keyEquivalent: "")
+        buttonItem.target = self
+        buttonItem.state = UserDefaults.standard.bool(forKey: Self.unlockButtonKey) ? .on : .off
+        menu.addItem(buttonItem)
+        menu.addItem(.separator())
         let cornerItem = NSMenuItem(title: "Bottom-right hot corner", action: #selector(toggleCorner), keyEquivalent: "")
         cornerItem.target = self
         cornerItem.state = corner == nil ? .off : .on
@@ -411,6 +420,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let quitItem = NSMenuItem(title: "Quit SoftLock", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         menu.addItem(quitItem)
         statusItem.menu = menu
+    }
+
+    @objc private func toggleUnlockButton() {
+        let visible = UserDefaults.standard.bool(forKey: Self.unlockButtonKey)
+        UserDefaults.standard.set(!visible, forKey: Self.unlockButtonKey)
+        updateCountdown()
+        buildMenu()
     }
 
     @objc private func toggleCorner() {
