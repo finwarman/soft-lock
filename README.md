@@ -14,6 +14,16 @@ Press P while covered to require a PIN for this lock. First use asks you to ente
 
 The PIN resets to optional after unlocking. Its salted hash is saved only in `~/Library/Application Support/SoftLock/pin.json`, outside the repository, with owner-only file permissions. No PIN is bundled in the app. PIN protection remains a soft lock and does not prevent Force Quit.
 
+## Touch ID
+
+Click Touch ID on a cover, or press Return or Space, then use your fingerprint in the macOS prompt. Successful authentication uncovers every screen, including PIN-protected covers. Cancelling or failing leaves the covers in place. The shortcut and PIN still work. Touch ID must already be configured in macOS.
+
+## Hot corner
+
+Enable Bottom-right hot corner in the menu. Hold the pointer in a display’s bottom-right corner briefly to cover every screen. Entering the corner never unlocks them.
+
+SoftLock temporarily disables the Dock’s bottom-right action to avoid triggering the macOS lock screen too. It restores the previous action when disabled or when SoftLock exits. A helper waits for process exit without polling and restores the action after a crash or Force Quit. The Dock restarts when this setting changes. Other hot corners are untouched.
+
 ## Build
 
 Requires macOS 13 or newer and the Xcode command line tools. The build includes Intel and Apple silicon binaries.
@@ -32,3 +42,14 @@ This briefly covers all screens, checks the display count, then uncovers them an
 ```sh
 "$HOME/Applications/SoftLock.app/Contents/MacOS/SoftLock" --smoke-test
 ```
+
+The smoke test also checks failed, stale, and successful authentication callbacks. It does not authenticate a real fingerprint.
+
+To check hot-corner recovery, quit SoftLock first:
+
+```sh
+swiftc -parse-as-library HotCorner.swift tests/CornerProbe.swift -o build/corner-probe
+python3 tests/hot-corner-smoke.py
+```
+
+This temporarily takes over the bottom-right corner and verifies restoration after normal exit and forced termination.

@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import LocalAuthentication
 import IOKit.pwr_mgt
 
 private enum AwakeSettings {
@@ -69,11 +70,17 @@ private final class CoverWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
+private enum AuthenticationResult { case accepted, rejected }
+
 private enum PinPrompt {
     case hidden, setup, confirm, unlock, disable
 }
 
 private final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let cornerKey = "bottomRightHotCorner"
+    private var corner: HotCorner?
+    private var authentication: LAContext?
+    private var authenticationID: UUID?
     private var statusItem: NSStatusItem!
     private var covers: [NSWindow] = []
     private var hotKey: EventHotKeyRef?
@@ -133,6 +140,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NotificationCenter.default.addObserver(self, selector: #selector(refreshScreens), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         registerShortcut()
+        if UserDefaults.standard.bool(forKey: Self.cornerKey), !CommandLine.arguments.contains("--smoke-test") {
+            enableCorner()
+        }
         buildMenu()
 
         if CommandLine.arguments.contains("--smoke-test") {
@@ -168,6 +178,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             handleCoverKey("\r")
             precondition(!locked && covers.isEmpty)
             toggleLock()
+            let authenticationTest = UUID()
+            authenticationID = authenticationTest
+            finishTouchID(.accepted, identifier: UUID())
+            precondition(locked, "Stale authentication must not unlock")
+            finishTouchID(.rejected, identifier: authenticationTest)
+            precondition(locked, "Failed authentication must not unlock")
+            authenticationID = authenticationTest
+            finishTouchID(.accepted, identifier: authenticationTest)
+            precondition(!locked, "Successful authentication must unlock")
+            toggleLock()
             setAwakeHours(9)
             precondition(awake.countdown == "540m")
             precondition(awake.hasExpired(at: Date().addingTimeInterval(10 * AwakeSettings.secondsPerHour)))
@@ -191,6 +211,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleCoverKey(_ text: String) {
+        if text == " " || (pinPrompt == .hidden && (text == "\r" || text == "\n")) {
+            requestTouchID()
+            return
+        }
         if pinPrompt != .hidden {
             if text == "\u{1b}" {
                 showPinPrompt(.hidden)
@@ -272,11 +296,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         case .unlock: title = "Enter PIN to unlock"
         case .disable: title = "Enter PIN to disable protection"
         }
-        let text = pinPrompt == .hidden ? "" : "\(title)\n\(String(repeating: "•", count: pinInput.count))\n\(pinMessage.isEmpty ? "Return to confirm · Esc to cancel" : pinMessage)"
+        let text = pinPrompt == .hidden ? pinMessage : "\(title)\n\(String(repeating: "•", count: pinInput.count))\n\(pinMessage.isEmpty ? "Return to confirm · Esc to cancel" : pinMessage)"
         pinLabels.forEach { $0.stringValue = text }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        authentication?.invalidate()
+        corner?.stop()
         awake.stop()
         NSApp.presentationOptions = []
     }
@@ -370,9 +396,79 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         defaultsItem.submenu = defaultsMenu
         menu.addItem(defaultsItem)
         menu.addItem(.separator())
+        let cornerItem = NSMenuItem(title: "Bottom-right hot corner", action: #selector(toggleCorner), keyEquivalent: "")
+        cornerItem.target = self
+        cornerItem.state = corner == nil ? .off : .on
+        menu.addItem(cornerItem)
+        menu.addItem(.separator())
         let quitItem = NSMenuItem(title: "Quit SoftLock", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         menu.addItem(quitItem)
         statusItem.menu = menu
+    }
+
+    @objc private func toggleCorner() {
+        if let corner {
+            corner.stop()
+            self.corner = nil
+            UserDefaults.standard.set(false, forKey: Self.cornerKey)
+        } else {
+            enableCorner()
+        }
+        buildMenu()
+    }
+
+    private func enableCorner() {
+        let corner = HotCorner { [weak self] in
+            guard let self, !self.locked else { return }
+            self.toggleLock()
+        }
+        do {
+            try corner.start()
+            self.corner = corner
+            UserDefaults.standard.set(true, forKey: Self.cornerKey)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Could not enable the hot corner"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    @objc private func requestTouchID() {
+        guard locked, authentication == nil else { return }
+        let context = LAContext()
+        context.localizedFallbackTitle = ""
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
+            if pinEnabled { showPinPrompt(.unlock) }
+            pinMessage = "Touch ID unavailable. Use your shortcut or PIN."
+            updatePinLabels()
+            return
+        }
+        let identifier = UUID()
+        authenticationID = identifier
+        authentication = context
+        // Keep covers visible while allowing the system authentication dialog above them.
+        covers.forEach { $0.level = .normal }
+        NSApp.presentationOptions = [.hideDock, .hideMenuBar]
+        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
+                               localizedReason: "Unlock SoftLock") { [weak self] success, _ in
+            DispatchQueue.main.async { self?.finishTouchID(success ? .accepted : .rejected, identifier: identifier) }
+        }
+    }
+
+    private func finishTouchID(_ result: AuthenticationResult, identifier: UUID) {
+        guard locked, authenticationID == identifier else { return }
+        authentication = nil
+        authenticationID = nil
+        if result == .accepted {
+            unlockScreens()
+            return
+        }
+        covers.forEach { $0.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow))) }
+        NSApp.presentationOptions = [.hideDock, .hideMenuBar, .disableProcessSwitching]
+        NSApp.activate(ignoringOtherApps: true)
+        covers.first?.makeKeyAndOrderFront(nil)
     }
 
     @objc private func changeDefault(_ sender: NSMenuItem) {
@@ -412,6 +508,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func unlockScreens() {
+        authenticationID = nil
+        authentication?.invalidate()
+        authentication = nil
         locked = false
         pinEnabled = false
         showPinPrompt(.hidden)
@@ -437,7 +536,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             let window = CoverWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
             window.backgroundColor = .black
             window.isOpaque = true
-            window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow)))
+            window.level = authentication == nil ? NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow))) : .normal
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
             window.isReleasedWhenClosed = false
             window.setFrame(screen.frame, display: true)
@@ -471,6 +570,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                     pinLabel.widthAnchor.constraint(equalToConstant: 320)
                 ])
             }
+            let touch = NSButton(title: "Touch ID", target: self, action: #selector(requestTouchID))
+            touch.bezelStyle = .rounded
+            touch.translatesAutoresizingMaskIntoConstraints = false
+            window.contentView?.addSubview(touch)
+            if let content = window.contentView {
+                NSLayoutConstraint.activate([
+                    touch.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+                    touch.topAnchor.constraint(equalTo: pinLabel.bottomAnchor, constant: 16)
+                ])
+            }
             window.orderFrontRegardless()
             return window
         }
@@ -479,6 +588,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         updateCountdown()
     }
 }
+
+if HotCorner.runRecovery() { exit(EXIT_SUCCESS) }
 
 let app = NSApplication.shared
 private let delegate = AppDelegate()

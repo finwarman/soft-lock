@@ -5,8 +5,8 @@ app_path="$HOME/Applications/SoftLock.app"
 mkdir -p "$app_path/Contents/MacOS"
 mkdir -p "$project_dir/build"
 for architecture in arm64 x86_64; do
-  swiftc "$project_dir/main.swift" "$project_dir/PinStore.swift" -O \
-    -target "$architecture-apple-macosx13.0" -framework AppKit -framework Carbon \
+  swiftc "$project_dir/main.swift" "$project_dir/PinStore.swift" "$project_dir/HotCorner.swift" -O \
+    -target "$architecture-apple-macosx13.0" -framework AppKit -framework Carbon -framework LocalAuthentication \
     -o "$project_dir/build/SoftLock-$architecture"
 done
 lipo -create "$project_dir/build/SoftLock-arm64" "$project_dir/build/SoftLock-x86_64" \
@@ -19,7 +19,7 @@ cat > "$app_path/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.fin.softlock</string>
 <key>CFBundleName</key><string>SoftLock</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.0</string>
+<key>CFBundleShortVersionString</key><string>1.1</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
