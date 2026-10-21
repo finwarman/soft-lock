@@ -72,6 +72,12 @@ private final class CoverWindow: NSWindow {
 
 private enum AuthenticationResult { case accepted, rejected }
 
+private enum CoverRequest {
+    static let name = Notification.Name("local.fin.softlock.cover")
+    static let hoursKey = "hours"
+    static let argument = "--lock-for"
+}
+
 private enum PinPrompt {
     case hidden, setup, confirm, unlock, disable
 }
@@ -141,6 +147,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         NotificationCenter.default.addObserver(self, selector: #selector(refreshScreens), name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(coverRequested(_:)),
+                                                          name: CoverRequest.name, object: nil)
         registerShortcut()
         if UserDefaults.standard.bool(forKey: Self.cornerKey), !CommandLine.arguments.contains("--smoke-test") {
             enableCorner()
@@ -520,6 +528,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         buildMenu()
     }
 
+    @objc private func coverRequested(_ notification: Notification) {
+        guard let hours = notification.userInfo?[CoverRequest.hoursKey] as? Int, (0...9).contains(hours) else { return }
+        if !locked { toggleLock() }
+        guard locked else { return }
+        setAwakeHours(hours)
+    }
+
     @objc private func toggleLock() {
         if locked {
             requestUnlock()
@@ -626,6 +641,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 if HotCorner.runRecovery() { exit(EXIT_SUCCESS) }
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == CoverRequest.argument {
+    guard let hours = Int(CommandLine.arguments[2]), (0...9).contains(hours) else { exit(EXIT_FAILURE) }
+    DistributedNotificationCenter.default().postNotificationName(CoverRequest.name, object: nil,
+        userInfo: [CoverRequest.hoursKey: hours], deliverImmediately: true)
+    exit(EXIT_SUCCESS)
+}
 
 let app = NSApplication.shared
 private let delegate = AppDelegate()

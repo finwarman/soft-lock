@@ -55,3 +55,11 @@ python3 tests/hot-corner-smoke.py
 ```
 
 This temporarily takes over the bottom-right corner and verifies restoration after normal exit and forced termination.
+
+With SoftLock running, cover all displays and set the current session’s awake timer directly:
+
+```sh
+"$HOME/Applications/SoftLock.app/Contents/MacOS/SoftLock" --lock-for 2
+```
+
+This command never uncovers screens. Repeating it restarts the timer. Use 0 for indefinite awake time or 1–9 for hours.
